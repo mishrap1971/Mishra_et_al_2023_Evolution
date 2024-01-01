@@ -1,0 +1,120 @@
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/Prashastcha Mishra/Desktop/ProjectII/R/Gonad.Specific.Expression') 
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE)
+
+library(dplyr)
+library(ggplot2)
+```
+
+# Load data
+FPKM estimates were obtained from Supplementary Data of Witt et al. 2021, which is based on RNAseq data from FlyAtlas2. Witt et al.'s data can be found here: https://github.com/LiZhaoLab/TissueSpecificity/blob/master/tissueSpecificityData/190508_flyatlas_allgenes_alltissues_uniq_FPKM.txt.gz
+
+```{r}
+fpkm.df <- read.table('FlyAtlas_FPKM_all_tissues.txt', header = T)
+names(fpkm.df)
+```
+
+# Estimate Gonad Specificity Index (GSI)
+GSI for a gene in males = FPKM in testes/Sum(FPKM in each tissue in males)
+
+GSI for a gene in females = FPKM in ovaries/Sum(FPKM in each tissue in males)
+
+When estimating GSI, the denominator should not include FPKMs from overlapping tissues. The following tissues will be excluded from consideration here: Carcass (overlaps all abdominal and thoracic tissue), Head (overlaps with Brain, Eye, POSSIBLY salivary glands),
+Whole (overlaps with everything), Anal Tissue (overlaps with hindgut). Expression in Virgin Spermatheca was used instead of expression in Mated Spermatheca.
+
+
+```{r}
+# For each sex, make dataframe with FPKMs of the relevant tissues 
+
+fpkm.females.df <- cbind.data.frame(geneID = fpkm.df$merged.ID, FemaleMidgut = fpkm.df$FemaleMidgut, Ovary = fpkm.df$FemaleOvary,
+                   FemaleHindgut = fpkm.df$FemaleHindgut, FemaleTubule = fpkm.df$FemaleTubule, 
+                   FemaleBrain = fpkm.df$FemaleBrain, FemaleCrop = fpkm.df$FemaleCrop, FemaleEye = fpkm.df$FemaleEye,
+                   FemaleSalivary = fpkm.df$FemaleSalivary, FemaleSpermatheca = fpkm.df$FemaleVirginSpermatheca)
+
+fpkm.males.df <- cbind.data.frame(geneID = fpkm.df$merged.ID, MaleMidgut = fpkm.df$MaleMidgut, Testes = fpkm.df$MaleTestis,
+                 MaleHindgut = fpkm.df$MaleHindgut, MaleTubule = fpkm.df$MaleTubule, 
+                 MaleBrain = fpkm.df$MaleBrain, MaleCrop = fpkm.df$MaleCrop, MaleEye = fpkm.df$MaleEye,
+                 MaleSalivary = fpkm.df$MaleSalivary)
+
+names(fpkm.females.df)
+names(fpkm.males.df)
+
+
+# Calculate denominator for the GSI estimate (sum of expression in all tissues)
+# Remove genes where the denominator is zero
+
+
+fpkm.females.df$ExpressionSum <- rowSums(fpkm.females.df[sapply(fpkm.females.df, is.numeric)], na.rm = TRUE)
+fpkm.males.df$ExpressionSum <- rowSums(fpkm.males.df[sapply(fpkm.males.df, is.numeric)], na.rm = TRUE)
+
+fpkm.females.df <- filter(fpkm.females.df, ExpressionSum > 0)
+fpkm.males.df <- filter(fpkm.males.df, ExpressionSum > 0)
+
+# Estimate GSI for each sex
+# The function below makes a new dataframe for each sex, consisting of geneID and GSI
+
+EstimateGonadSpecificityIndex <- function(fpkm.dataframe){
+  GSI.list <- c()
+  for (i in 1:nrow(fpkm.dataframe)){
+    ratio <- fpkm.dataframe[i,3]/fpkm.dataframe$ExpressionSum[i]
+    GSI.list <- c(GSI.list, ratio)
+  }
+  GSI.df <- cbind.data.frame(geneID = fpkm.dataframe[,1], Gonad.Specificity.Index = GSI.list)
+  return(GSI.df)
+}
+
+GSI.females <- EstimateGonadSpecificityIndex(fpkm.females.df)
+GSI.males <- EstimateGonadSpecificityIndex(fpkm.males.df)
+
+#write.table(GSI.females, 'Gonad.Specificity.Index.Females.tsv', quote = F, row.names = F, col.names = T, sep = '\t')
+#write.table(GSI.males, 'Gonad.Specificity.Index.Males.tsv', quote = F, row.names = F, col.names = T, sep = '\t')
+
+```
+
+# Analyse genes with high ovary/testis specificity
+Genes where GSI >= 0.95 are designated as highly gonad-specific in their expression. What is the distribution of sex bias values for these genes? Sex bias values were obtained using data from Osada et al. 2017. Note that some of the highly gonad-specific genes might be sex-limited and consequently, not have a sex bias value available.
+
+```{r}
+sexbias.df <- read.table("C:/Users/Prashastcha Mishra/Desktop/ProjectII/R/Sex.Biased.Gene.Expression/Osada.2017/Sex.Biased.Genes.body.tsv", header = T, sep = '\t')
+
+high.GSI.ovaries <- filter(GSI.females, Gonad.Specificity.Index >= 0.95)  #nrow = 95
+high.GSI.testes <- filter(GSI.males, Gonad.Specificity.Index >= 0.95)     #nrow = 2081
+
+high.GSI.ovaries.df <- cbind.data.frame(geneID = high.GSI.ovaries[high.GSI.ovaries$geneID %in% sexbias.df$geneID,]$geneID,
+                       GSI = high.GSI.ovaries[high.GSI.ovaries$geneID %in%  sexbias.df$geneID,]$Gonad.Specificity.Index, 
+                       Sex.Bias.Osada = sexbias.df[sexbias.df$geneID %in% high.GSI.ovaries$geneID,]$log2FoldChange) #nrow = 51
+high.GSI.testes.df <- cbind.data.frame(geneID = high.GSI.testes[high.GSI.testes$geneID %in% sexbias.df$geneID,]$geneID,
+                      GSI = high.GSI.testes[high.GSI.testes$geneID %in%  sexbias.df$geneID,]$Gonad.Specificity.Index, 
+                      Sex.Bias.Osada = sexbias.df[sexbias.df$geneID %in% high.GSI.testes$geneID,]$log2FoldChange)   #nrow = 1293
+
+
+hist1 <- ggplot(high.GSI.ovaries.df, aes(x = Sex.Bias.Osada)) +
+         geom_histogram(color="grey56", fill="white", stat = "bin", bins = 30) +
+         theme_minimal() +
+         labs(x = "Sex Bias", y = "Frequency", title = "Sex Bias of Highly Ovary-Specific Genes") +
+         theme(legend.title = element_blank(),
+               plot.title = element_text(color = "black", hjust = 0.5, size = 14 ),
+               legend.text = element_text(color = "black", hjust = 0, size = 11.8),
+               axis.text.x = element_text(size = 12, hjust = 0.5), 
+               axis.text.y = element_text(size = 12, hjust = 1),
+               axis.title.x = element_text(margin = margin(0,10,0,0), size = 14),
+               axis.title.y = element_text(margin = margin(0,10,0,0), size = 14)) +
+         geom_vline(aes(xintercept=mean(Sex.Bias.Osada)),color="orange", linetype="dashed", size=1)
+hist1
+
+hist2 <- ggplot(high.GSI.testes.df, aes(x = Sex.Bias.Osada)) +
+         geom_histogram(color="grey56", fill="white", stat = "bin", bins = 30) +
+         theme_minimal() +
+         labs(x = "Sex Bias", y = "Frequency", title = "Sex Bias of Highly Testes-Specific Genes") +
+         theme(legend.title = element_blank(),
+               plot.title = element_text(color = "black", hjust = 0.5, size = 14 ),
+               legend.text = element_text(color = "black", hjust = 0, size = 11.8),
+               axis.text.x = element_text(size = 12, hjust = 0.5), 
+               axis.text.y = element_text(size = 12, hjust = 1),
+               axis.title.x = element_text(margin = margin(0,10,0,0), size = 14),
+               axis.title.y = element_text(margin = margin(0,10,0,0), size = 14)) +
+         geom_vline(aes(xintercept=mean(Sex.Bias.Osada)),color="orange", linetype="dashed", size=1)
+hist2
+
+```
