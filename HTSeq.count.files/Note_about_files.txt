@@ -1,2 +1,0 @@
-These counts were obtained from aligned BAM files made through alignment of RNA-seq files via bwa-mem.
-Each file corresponds to the htseq-count for the named sample
